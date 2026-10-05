@@ -75,3 +75,5 @@ h1 { margin: 0 0 8px; font-size: 1.8rem; }
 }
 #stage .docx-wrapper { padding: 0; background: #fff; }
 #stage section.docx { box-shadow: none; margin: 0 0 20px; }
+/* Like Word, draw photos as stored, ignoring the camera's rotation tag. */
+#stage img { image-orientation: none; }

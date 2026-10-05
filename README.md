@@ -8,8 +8,10 @@ Live site: https://sudheernookala.github.io/Online-Converter/
 ## How it works
 
 1. [docx-preview](https://github.com/VolodymyrBaydalka/docxjs) lays out the Word document in the browser.
-2. Each page is captured at **300 DPI** (print quality) with [modern-screenshot](https://github.com/qq15725/modern-screenshot). A Letter page becomes 2550 × 3300 pixels, so pictures stay sharp.
-3. [jsPDF](https://github.com/parallax/jsPDF) puts the pages into a PDF at the original page size.
+2. Each page is captured at **300 DPI** (print quality) with [modern-screenshot](https://github.com/qq15725/modern-screenshot).
+3. **Pictures are placed into the PDF as their original files**, on top of the page at their exact position. JPEG photos are copied byte for byte (no re-compression), PNG pictures stay lossless with transparency, and a picture used twice is stored once. So pictures keep their full resolution, the same as Word's own "Save as PDF". Cropped pictures keep the original file and are clipped in the PDF.
+   A picture stays part of the page image only when it is rotated, faded, overlapped by text or other pictures, or in a format other than JPEG/PNG.
+4. [jsPDF](https://github.com/parallax/jsPDF) builds the PDF at the original page size.
 
 Pictures are never cut in half at a page break; a picture that does not fit moves to the next page.
 

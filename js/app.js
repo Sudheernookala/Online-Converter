@@ -1,7 +1,7 @@
 // Word (.docx) to high-resolution PDF, fully in the browser.
 // Libraries: docx-preview (window.docx) lays out the document, modern-screenshot
 // captures each page as a high-resolution image, jsPDF (window.jspdf) builds the PDF.
-import { domToCanvas } from '../vendor/modern-screenshot.mjs?v=4';
+import { domToCanvas } from '../vendor/modern-screenshot.mjs?v=5';
 
 // Pages are captured at 300 DPI (print quality).
 const DPI = 300;
@@ -134,6 +134,7 @@ async function convertDocxToPdf(file) {
   fixLibraryStyles(styles);
   fixTables(body);
   applyContextualSpacing(body, info.contextualStyles);
+  fixCroppedPictures(body);
   setProgress('Loading fonts…', 0.07);
   await loadUsedFonts(body);
   applyWordLineSpacing(body);
@@ -405,13 +406,245 @@ function pickScale(width, height) {
   return scale;
 }
 
+// ---------- Original-quality pictures ----------
+//
+// The page itself is captured as one 300 DPI image. Pictures are then placed
+// on top as their ORIGINAL files (JPEG bytes are copied unchanged, PNG is kept
+// lossless), at their exact position, so they keep their full resolution.
+// A picture is only handled this way when nothing is drawn over it; otherwise
+// it simply stays part of the page image.
+
+function dataUrlBytes(src) {
+  const m = /^data:[^,]*;base64,(.*)$/s.exec(src || '');
+  if (!m) return null;
+  const bin = atob(m[1]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+/** Number of colour channels in a JPEG (3 = RGB, 1 = grey, 4 = CMYK). */
+function inspectJpeg(b) {
+  let i = 2;
+  while (i + 9 < b.length && b[i] === 0xff) {
+    const marker = b[i + 1];
+    // Start-of-frame markers hold the channel count.
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { components: b[i + 9] };
+    i += 2 + ((b[i + 2] << 8) | b[i + 3]);
+  }
+  return { components: 3 };
+}
+
+function imageKind(bytes) {
+  if (!bytes || bytes.length < 8) return null;
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'JPEG';
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'PNG';
+  return null;
+}
+
+function relRect(r, origin) {
+  return { x: r.left - origin.left, y: r.top - origin.top, w: r.width, h: r.height };
+}
+
+function intersect(a, b) {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const w = Math.min(a.x + a.w, b.x + b.w) - x;
+  const h = Math.min(a.y + a.h, b.y + b.h) - y;
+  return w > 0 && h > 0 ? { x, y, w, h } : null;
+}
+
+/**
+ * Reads a picture's crop from its CSS clip-path, as fractions cut from each
+ * edge. Browsers report inset(top right bottom left), each measured from its
+ * own edge; some report rect(top right bottom left), measured from top/left.
+ */
+function parseCrop(clipPath) {
+  const pct = '\\s*(-?[\\d.]+)%';
+  const inset = new RegExp(`^inset\\(${pct}${pct}${pct}${pct}\\s*\\)$`).exec(clipPath);
+  if (inset) {
+    const [t, r, b, l] = inset.slice(1).map((v) => Number(v) / 100);
+    return { t, r, b, l };
+  }
+  const rect = new RegExp(`^rect\\(${pct}${pct}${pct}${pct}\\s*\\)$`).exec(clipPath);
+  if (rect) {
+    const [top, right, bottom, left] = rect.slice(1).map((v) => Number(v) / 100);
+    return { t: top, r: 1 - right, b: 1 - bottom, l: left };
+  }
+  return null;
+}
+
+/**
+ * The library crops a picture by enlarging it from its centre and clipping
+ * it, which shifts the visible part away from the picture's frame when the
+ * crop is not the same on both sides. Enlarge from the point that keeps the
+ * visible part exactly in the frame, as Word does.
+ */
+function fixCroppedPictures(root) {
+  for (const img of root.querySelectorAll('img[style*="clip-path"]')) {
+    const cs = getComputedStyle(img);
+    const crop = parseCrop(cs.clipPath);
+    if (!crop || !scaleOnly(cs.transform)) continue;
+    const { t, r, b, l } = crop;
+    const ox = l + r > 0 ? (l / (l + r)) * 100 : 50;
+    const oy = t + b > 0 ? (t / (t + b)) * 100 : 50;
+    img.style.transformOrigin = `${ox}% ${oy}%`;
+  }
+}
+
+/** Reads a CSS transform that only scales (how the library crops pictures). */
+function scaleOnly(transform) {
+  if (!transform || transform === 'none') return { sx: 1, sy: 1 };
+  const m = /^matrix\(([^)]+)\)$/.exec(transform);
+  if (!m) return null;
+  const [a, b, c, d, e, f] = m[1].split(',').map(Number);
+  if (Math.abs(b) > 1e-6 || Math.abs(c) > 1e-6 || a <= 0 || d <= 0) return null; // rotated / flipped
+  if (Math.abs(e) > 0.01 || Math.abs(f) > 0.01) return null;
+  return { sx: a, sy: d };
+}
+
+/**
+ * Finds the pictures in a section that can be placed as original files.
+ * Returns [{ img, full, visible, bytes, kind, redraw }] in section pixels:
+ * `full` is where the whole picture is drawn, `visible` the part that shows
+ * (smaller when the picture is cropped).
+ */
+function collectPictures(section) {
+  const origin = section.getBoundingClientRect();
+  const imgs = [...section.querySelectorAll('img')].filter((img) => img.naturalWidth && img.style.visibility !== 'hidden');
+
+  // Everything else that is drawn: text and other pictures.
+  const textRects = [];
+  for (const node of section.querySelectorAll('span, a')) {
+    if (!node.textContent.trim()) continue;
+    for (const r of node.getClientRects()) textRects.push(relRect(r, origin));
+  }
+
+  const found = [];
+  for (const img of imgs) {
+    // Rotated, flipped, faded or filtered pictures stay in the page image.
+    let ok = true;
+    for (let el = img.parentElement; el && el !== section; el = el.parentElement) {
+      const cs = getComputedStyle(el);
+      if (cs.transform !== 'none' || cs.filter !== 'none' || Number(cs.opacity) < 1) ok = false;
+    }
+    const ics = getComputedStyle(img);
+    const scale = scaleOnly(ics.transform);
+    if (!ok || !scale || ics.filter !== 'none' || Number(ics.opacity) < 1) continue;
+    if (ics.objectFit && ics.objectFit !== 'fill') continue;
+
+    const full = relRect(img.getBoundingClientRect(), origin);
+    if (full.w < 2 || full.h < 2) continue;
+    let visible = { ...full };
+
+    // Word cropping: the library enlarges the picture and clips it.
+    if (ics.clipPath && ics.clipPath !== 'none') {
+      const crop = parseCrop(ics.clipPath);
+      if (!crop) continue; // other clip shapes stay in the page image
+      const { t, r, b, l } = crop;
+      visible = {
+        x: full.x + l * full.w, y: full.y + t * full.h,
+        w: (1 - l - r) * full.w, h: (1 - t - b) * full.h,
+      };
+    }
+
+    // Clipping by the frames around the picture.
+    for (let el = img.parentElement; el && el !== section && visible; el = el.parentElement) {
+      const cs = getComputedStyle(el);
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+        visible = intersect(visible, relRect(el.getBoundingClientRect(), origin));
+      }
+    }
+    if (visible) visible = intersect(visible, { x: 0, y: 0, w: section.offsetWidth, h: section.offsetHeight });
+    if (!visible || visible.w < 2 || visible.h < 2) continue;
+
+    // Nothing may be drawn over or under it (text in front of / behind it).
+    const inner = { x: visible.x + 1, y: visible.y + 1, w: visible.w - 2, h: visible.h - 2 };
+    if (textRects.some((r) => intersect(r, inner))) continue;
+
+    const bytes = dataUrlBytes(img.src);
+    const kind = imageKind(bytes);
+    if (!kind) continue; // other formats stay in the page image
+    // CMYK photos are redrawn at full resolution so the colours are right.
+    const redraw = kind === 'JPEG' && ![1, 3].includes(inspectJpeg(bytes).components);
+    found.push({ img, full, visible, inner, bytes, kind, redraw });
+  }
+  // Overlapping pictures: their stacking order is hard to know; keep them in the page image.
+  return found.filter((p) => !found.some((q) => q !== p && intersect(q.visible, p.inner)));
+}
+
+/** Places a section's pictures onto the current PDF page. */
+function placePictures(pdf, pictures, page, cache) {
+  // Map a rectangle in section pixels to this page's PDF points.
+  const map = ({ x, y, w, h }) => {
+    if (page.slice) {
+      y = y - page.slice.srcY + page.slice.destY;
+    } else if (page.shrink) {
+      const s = page.shrink;
+      x = (page.width - page.width * s) / 2 + x * s;
+      y *= s;
+      w *= s;
+      h *= s;
+    }
+    return { x: x * PX_TO_PT, y: y * PX_TO_PT, w: w * PX_TO_PT, h: h * PX_TO_PT };
+  };
+
+  for (const pic of pictures) {
+    if (page.slice) {
+      const { srcY, srcH } = page.slice;
+      if (pic.visible.y < srcY - 0.5 || pic.visible.y + pic.visible.h > srcY + srcH + 0.5) continue;
+    }
+    const full = map(pic.full);
+    const vis = map(pic.visible);
+    const cropped = Math.abs(full.w - vis.w) > 0.1 || Math.abs(full.h - vis.h) > 0.1;
+
+    if (cropped) {
+      // Show only the visible part: the full original picture inside a clip.
+      pdf.saveGraphicsState();
+      pdf.rect(vis.x, vis.y, vis.w, vis.h, null);
+      pdf.clip();
+      pdf.discardPath();
+    }
+    if (!pic.redraw) {
+      // The same picture used again is stored once (alias).
+      const alias = cache.get(pic.img.src) ?? `pic${cache.size}`;
+      cache.set(pic.img.src, alias);
+      pdf.addImage(pic.bytes, pic.kind, full.x, full.y, full.w, full.h, alias, 'FAST');
+    } else {
+      const c = document.createElement('canvas');
+      let k = 1;
+      const area = pic.img.naturalWidth * pic.img.naturalHeight;
+      if (area > MAX_CANVAS_PIXELS) k = Math.sqrt(MAX_CANVAS_PIXELS / area);
+      c.width = Math.round(pic.img.naturalWidth * k);
+      c.height = Math.round(pic.img.naturalHeight * k);
+      c.getContext('2d').drawImage(pic.img, 0, 0, c.width, c.height);
+      pdf.addImage(c.toDataURL('image/jpeg', 0.98), 'JPEG', full.x, full.y, full.w, full.h);
+      c.width = c.height = 0;
+    }
+    if (cropped) pdf.restoreGraphicsState();
+  }
+}
+
 async function buildPdf(pages) {
   const { jsPDF } = window.jspdf;
   let pdf = null;
+  const picturesBySection = new Map();
+  const aliasCache = new Map();
 
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i];
     setProgress(`Converting page ${i + 1} of ${pages.length}…`, 0.1 + 0.85 * (i / pages.length));
+
+    // Pictures placed as original files are hidden in the page image
+    // (visibility keeps the layout unchanged).
+    if (!picturesBySection.has(page.el)) {
+      const pics = collectPictures(page.el);
+      // A picture cut across two split pages stays in the page image.
+      const placeable = pics.filter((pic) => !pages.some((p) => p.el === page.el && p.slice &&
+        pic.visible.y < p.slice.srcY + p.slice.srcH - 0.5 && pic.visible.y + pic.visible.h > p.slice.srcY + p.slice.srcH + 0.5));
+      placeable.forEach((pic) => { pic.img.style.visibility = 'hidden'; });
+      picturesBySection.set(page.el, placeable);
+    }
 
     const scale = pickScale(page.width, page.height);
     let canvas;
@@ -425,6 +658,7 @@ async function buildPdf(pages) {
     if (!pdf) pdf = new jsPDF({ unit: 'pt', format: [wPt, hPt], orientation, compress: true });
     else pdf.addPage([wPt, hPt], orientation);
     pdf.addImage(canvas.toDataURL('image/jpeg', JPEG_QUALITY), 'JPEG', 0, 0, wPt, hPt);
+    placePictures(pdf, picturesBySection.get(page.el), page, aliasCache);
 
     // Free memory before the next page, and let the progress bar repaint.
     canvas.width = canvas.height = 0;
