@@ -79,3 +79,5 @@ drop.addEventListener('keydown', (e) => {
 );
 drop.addEventListener('drop', (e) => handleFile(e.dataTransfer.files[0]));
 $('again').addEventListener('click', () => { show(result, false); input.click(); });
+
+window.__converterReady = true;

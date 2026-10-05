@@ -65,5 +65,19 @@
     <div id="stage" aria-hidden="true"></div>
 
     <script type="module" src="./src/main.js"></script>
+    <script>
+      // If the app code fails to load, say so instead of silently doing nothing.
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          if (window.__converterReady) return;
+          var box = document.getElementById('error');
+          box.textContent = 'The converter failed to load, so files cannot be converted. ' +
+            'Please refresh the page. If this keeps happening, the site was published without being built ' +
+            '(GitHub Pages source must be set to "GitHub Actions").';
+          box.hidden = false;
+          document.getElementById('drop').classList.add('busy');
+        }, 3000);
+      });
+    </script>
   </body>
 </html>
