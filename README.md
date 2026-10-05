@@ -13,6 +13,12 @@ Live site: https://sudheernookala.github.io/Online-Converter/
 
 Pictures are never cut in half at a page break; a picture that does not fit moves to the next page.
 
+### Keeping Word's formatting and page count
+
+- **Same page count as Word:** Word saves its page count and page breaks in the file. When they are present, the PDF keeps exactly those pages. A page that comes out slightly too long is shrunk a little to fit, instead of spilling onto an extra page.
+- **Fonts:** `fonts/` holds free fonts with exactly the same letter widths as Calibri, Cambria, Times New Roman, Arial and Courier New (Carlito, Caladea, Tinos, Arimo, Cousine; SIL Open Font License). So text wraps like in Word even on devices without Microsoft fonts. An installed copy of the real font is always used first.
+- **Fixes for the layout library** (`js/app.js`): the document's main font and size (the "Normal" style) are applied to the text, Word's line spacing is calculated the way Word does it, Symbol/Wingdings bullets are shown as •, table header rows and banded rows get their style, and list items have no extra space between them when Word says so.
+
 ## No build step
 
 The site is plain HTML, CSS and JavaScript. The libraries are copied into `vendor/`.
@@ -29,6 +35,6 @@ python3 -m http.server 8000
 
 - **Text in the PDF is part of the page image**, so it cannot be selected or searched.
 - **Layout is close to Word, but not identical.** This is a browser renderer, not Microsoft Word. Text boxes, SmartArt, charts and complex columns may look different.
-- **Fonts:** if a font in the document is not installed on the device, a similar one is used.
+- **Fonts:** fonts other than the five above (for example Aptos, the newer Office default) are only exact if installed on the device; otherwise a similar font is used.
 - **EMF/WMF pictures** (common for pasted charts and clip art) cannot be shown by browsers. The page warns when this happens.
 - Old **.doc** files are not supported. Save them as .docx first.

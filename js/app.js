@@ -130,18 +130,200 @@ async function convertDocxToPdf(file) {
     experimental: true,
   });
 
-  await document.fonts.ready;
+  const info = await readDocxInfo(buffer);
+  fixLibraryStyles(styles);
+  fixTables(body);
+  applyContextualSpacing(body, info.contextualStyles);
+  setProgress('Loading fonts…', 0.07);
+  await loadUsedFonts(body);
+  applyWordLineSpacing(body);
   const brokenImages = await waitForImages(stage);
 
-  // Each rendered section is one page, unless its content ran past the page
-  // height (no page breaks in the file). Those are split into several pages.
-  const pages = [...body.querySelectorAll('section.docx')].flatMap(splitTallSection);
+  // Word stores its own page count in the file. When the rendered pages line
+  // up with Word's page breaks, keep exactly those pages (a page that runs a
+  // little long is shrunk to fit). Otherwise split long pages at line breaks.
+  const sections = [...body.querySelectorAll('section.docx')];
+  const pages = info.wordPages === sections.length
+    ? sections.flatMap(fitSection)
+    : sections.flatMap(splitTallSection);
   if (!pages.length) throw new Error('the document has no pages');
 
   const pdf = await buildPdf(pages);
   pdf.setProperties({ title: file.name.replace(/\.docx$/i, '') });
   setProgress('Finishing…', 1);
   return { blob: pdf.output('blob'), pageCount: pdf.getNumberOfPages(), brokenImages };
+}
+
+// ---------- Fixes for the Word layout library (docx-preview 0.4.1) ----------
+
+// Word bullets often use private-use characters from the Symbol / Wingdings
+// fonts, which only display on Windows. Map them to normal Unicode characters.
+const SYMBOL_BULLETS = {
+  '': '•', // • Symbol bullet
+  '': '▪', // ▪ Wingdings square
+  '': '➢', // ➢ Wingdings arrowhead
+  '': '✔', // ✔ Wingdings check
+  '': '❖', // ❖ Wingdings diamond
+  '': '■', // ■ Wingdings black square
+  '': '❑', // ❑ Wingdings box
+  '': '➔', // ➔ Wingdings arrow
+  '': '□', // □
+  '': '□', // □
+};
+
+function fixLibraryStyles(container) {
+  for (const style of container.querySelectorAll('style')) {
+    let css = style.textContent;
+    // The library writes the default paragraph style as ".docx p, p.docx_normal span",
+    // so its font and size never reach the text. Apply it to the text (spans)
+    // with low priority, so headings and other styles still win.
+    css = css.replace(/\.docx (\w+), (\1\.[\w-]+) (\w+)(\s*\{)/g, '.docx :where($1) $3, $2 $3$4');
+    // Word's "multiple" line spacing is a multiple of the font's natural line
+    // height, not of the font size. --docx-lh is set per paragraph later.
+    css = css.replace(/line-height:\s*([\d.]+)\s*;/g, 'line-height: calc($1 * var(--docx-lh, 1));');
+    // Symbol / Wingdings bullets.
+    css = css.replace(/[-]/g, (ch) => SYMBOL_BULLETS[ch] || '•');
+    css = css.replace(/font-family:\s*['"]?(Symbol|Wingdings[^;'"]*)['"]?\s*;/gi, 'font-family: inherit;');
+    style.textContent = css;
+  }
+}
+
+/** Makes sure every font face used in the document is loaded before measuring. */
+async function loadUsedFonts(root) {
+  const wanted = new Map();
+  for (const el of root.querySelectorAll('span, p')) {
+    const text = el.textContent.trim();
+    if (!text) continue;
+    const cs = getComputedStyle(el);
+    const key = `${cs.fontStyle} ${cs.fontWeight} 16px ${cs.fontFamily}`;
+    if (!wanted.has(key)) wanted.set(key, text.slice(0, 64));
+    if (wanted.size > 200) break;
+  }
+  await Promise.all([...wanted].map(([font, text]) => document.fonts.load(font, text).catch(() => {})));
+  await document.fonts.ready;
+}
+
+/** Natural line height of a font, as a multiple of its size (Calibri ≈ 1.22). */
+const lineRatioCache = new Map();
+function naturalLineRatio(fontFamily) {
+  if (!lineRatioCache.has(fontFamily)) {
+    const probe = document.createElement('span');
+    probe.textContent = 'Hg';
+    Object.assign(probe.style, {
+      fontFamily, fontSize: '100px', lineHeight: 'normal', display: 'inline-block', position: 'absolute',
+    });
+    stage.append(probe);
+    const ratio = probe.getBoundingClientRect().height / 100;
+    probe.remove();
+    lineRatioCache.set(fontFamily, ratio > 0.8 && ratio < 2 ? ratio : 1.15);
+  }
+  return lineRatioCache.get(fontFamily);
+}
+
+function applyWordLineSpacing(root) {
+  // Direct paragraph formatting is written as inline styles.
+  for (const el of root.querySelectorAll('[style*="line-height"]')) {
+    const v = el.style.lineHeight;
+    if (/^[\d.]+$/.test(v)) el.style.lineHeight = `calc(${v} * var(--docx-lh, 1))`;
+  }
+  for (const p of root.querySelectorAll('p')) {
+    const textEl = p.querySelector('span') || p;
+    p.style.setProperty('--docx-lh', naturalLineRatio(getComputedStyle(textEl).fontFamily).toFixed(3));
+  }
+}
+
+/**
+ * Reads details the layout library does not use:
+ * - wordPages: the page count Word saved (only trusted when Word also recorded
+ *   where its pages break), or null
+ * - contextualStyles: CSS classes of paragraph styles with "Don't add space
+ *   between paragraphs of the same style" (common for lists)
+ */
+async function readDocxInfo(buffer) {
+  const info = { wordPages: null, contextualStyles: new Set() };
+  try {
+    const zip = await window.JSZip.loadAsync(buffer);
+    const read = (name) => zip.file(name)?.async('string') ?? Promise.resolve('');
+    const [app, docXml, stylesXml] = await Promise.all([
+      read('docProps/app.xml'), read('word/document.xml'), read('word/styles.xml'),
+    ]);
+    const pages = app.match(/<(?:\w+:)?Pages>(\d+)</);
+    if (pages && docXml.includes('lastRenderedPageBreak')) info.wordPages = Number(pages[1]);
+
+    const doc = new DOMParser().parseFromString(stylesXml, 'application/xml');
+    for (const style of doc.getElementsByTagNameNS('*', 'style')) {
+      const cs = style.getElementsByTagNameNS('*', 'contextualSpacing')[0];
+      if (!cs) continue;
+      const val = cs.getAttributeNS(cs.namespaceURI, 'val') ?? cs.getAttribute('w:val');
+      if (val === '0' || val === 'false') continue;
+      const id = style.getAttributeNS(style.namespaceURI, 'styleId') || style.getAttribute('w:styleId');
+      // Same naming rule as the library: docx_<styleId, lowercase>.
+      if (id) info.contextualStyles.add('docx_' + id.replace(/[ .]+/g, '-').replace(/[&]+/g, 'and').toLowerCase());
+    }
+  } catch (err) {
+    console.warn('Could not read document details', err);
+  }
+  return info;
+}
+
+/** Word removes the space between paragraphs of the same style when asked to. */
+function applyContextualSpacing(root, classes) {
+  if (!classes.size) return;
+  for (const p of root.querySelectorAll('p')) {
+    const cls = [...p.classList].find((c) => classes.has(c));
+    if (!cls) continue;
+    const next = p.nextElementSibling;
+    if (next?.tagName === 'P' && next.classList.contains(cls)) {
+      p.style.marginBottom = '0';
+      next.style.marginTop = '0';
+    }
+  }
+}
+
+/**
+ * Table styles (header row, banded rows, first column…) only apply when the
+ * rows and cells carry marker classes. Word usually writes these markers, but
+ * not always; add them from the table's settings when they are missing.
+ */
+function fixTables(root) {
+  for (const table of root.querySelectorAll('table')) {
+    if (table.querySelector('tr.first-row, tr.odd-row, tr.even-row, td.first-col, td.odd-col')) continue;
+    const rows = [...table.rows].filter((r) => r.closest('table') === table);
+    if (!rows.length) continue;
+    const has = (c) => table.classList.contains(c);
+    if (has('first-row')) rows[0].classList.add('first-row');
+    if (has('last-row')) rows[rows.length - 1].classList.add('last-row');
+    let band = 0;
+    rows.forEach((row, ri) => {
+      const isHeader = (ri === 0 && has('first-row')) || (ri === rows.length - 1 && has('last-row'));
+      if (!isHeader && !has('no-hband')) row.classList.add(band++ % 2 === 0 ? 'odd-row' : 'even-row');
+      const cells = [...row.cells];
+      if (has('first-col') && cells[0]) cells[0].classList.add('first-col');
+      if (has('last-col') && cells.length) cells[cells.length - 1].classList.add('last-col');
+      let colBand = 0;
+      cells.forEach((cell, ci) => {
+        const isEdge = (ci === 0 && has('first-col')) || (ci === cells.length - 1 && has('last-col'));
+        if (!isEdge && !has('no-vband')) cell.classList.add(colBand++ % 2 === 0 ? 'odd-col' : 'even-col');
+      });
+    });
+  }
+}
+
+// ---------- Pages ----------
+
+/**
+ * One rendered section = one Word page. If the content runs a little past the
+ * page (small layout differences from Word), shrink it to fit instead of
+ * adding a page. Content much longer than a page is still split.
+ */
+function fitSection(el) {
+  const width = el.offsetWidth;
+  const totalHeight = el.offsetHeight;
+  const pageHeight = parsePx(getComputedStyle(el).minHeight) || totalHeight;
+  if (totalHeight <= pageHeight + 2) return [{ el, width, height: pageHeight, slice: null }];
+  const shrink = pageHeight / totalHeight;
+  if (shrink < 0.8) return splitTallSection(el);
+  return [{ el, width, height: pageHeight, slice: null, shrink, fullHeight: totalHeight }];
 }
 
 /** Waits for every image to load. Returns how many could not be displayed. */
@@ -232,9 +414,10 @@ async function buildPdf(pages) {
     setProgress(`Converting page ${i + 1} of ${pages.length}…`, 0.1 + 0.85 * (i / pages.length));
 
     const scale = pickScale(page.width, page.height);
-    const canvas = page.slice
-      ? await captureSlice(page, scale)
-      : await domToCanvas(page.el, { scale, backgroundColor: '#ffffff' });
+    let canvas;
+    if (page.slice) canvas = await captureSlice(page, scale);
+    else if (page.shrink) canvas = await captureShrunk(page, scale);
+    else canvas = await domToCanvas(page.el, { scale, backgroundColor: '#ffffff' });
 
     const wPt = page.width * PX_TO_PT;
     const hPt = page.height * PX_TO_PT;
@@ -279,6 +462,26 @@ async function captureSlice(page, scale) {
   } finally {
     box.remove();
   }
+}
+
+/** Captures a slightly-too-long page and scales it down onto one page. */
+async function captureShrunk(page, scale) {
+  // Captured at the normal scale; drawing it smaller keeps it at least as sharp.
+  const full = await domToCanvas(page.el, {
+    scale: Math.min(scale, pickScale(page.width, page.fullHeight)),
+    backgroundColor: '#ffffff',
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(page.width * scale);
+  canvas.height = Math.round(page.height * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingQuality = 'high';
+  const w = canvas.width * page.shrink;
+  ctx.drawImage(full, (canvas.width - w) / 2, 0, w, canvas.height);
+  full.width = full.height = 0;
+  return canvas;
 }
 
 window.__converterReady = true;
