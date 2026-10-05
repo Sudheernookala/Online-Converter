@@ -3,79 +3,55 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Convert Word (.docx) and PowerPoint (.pptx) files to high-resolution PDF in your browser. Files never leave your device." />
-    <title>Word & PowerPoint to PDF</title>
+    <meta name="description" content="Convert a Word (.docx) file to a high-resolution PDF in your browser." />
+    <title>Word to PDF</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23d93025'/><text x='16' y='21' font-size='11' font-family='Arial' font-weight='700' fill='white' text-anchor='middle'>PDF</text></svg>" />
-    <link rel="stylesheet" href="./src/style.css" />
+    <link rel="stylesheet" href="css/style.css" />
   </head>
   <body>
     <main class="app">
-      <header>
-        <h1>Word &amp; PowerPoint to PDF</h1>
-        <p class="lead">High-resolution conversion that runs fully in your browser. Your file is never uploaded to a server.</p>
-      </header>
-
-      <section class="options" aria-label="Conversion options">
-        <label>
-          Resolution
-          <select id="dpi">
-            <option value="200">Good – 200 DPI (smaller file)</option>
-            <option value="300" selected>High – 300 DPI (print quality)</option>
-            <option value="450">Very high – 450 DPI (largest file)</option>
-          </select>
-        </label>
-        <label>
-          Image quality
-          <select id="format">
-            <option value="jpeg" selected>Sharp (JPEG 95%)</option>
-            <option value="png">Lossless (PNG, larger file)</option>
-          </select>
-        </label>
-      </section>
+      <h1>Word to PDF</h1>
+      <p class="lead">Choose a Word file. It is converted to a high-resolution PDF and downloaded automatically. Your file stays on your device.</p>
 
       <label id="drop" class="drop" tabindex="0">
-        <input id="file" type="file" accept=".docx,.pptx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden />
+        <input id="file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden />
         <svg viewBox="0 0 24 24" width="48" height="48" aria-hidden="true"><path fill="currentColor" d="M19 15v4H5v-4H3v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4h-2ZM11 5.83V16h2V5.83l3.59 3.58L18 8l-6-6-6 6 1.41 1.41L11 5.83Z"/></svg>
-        <strong>Drop a .docx or .pptx file here</strong>
-        <span>or click to choose a file</span>
+        <strong id="drop-title">Choose a Word file (.docx)</strong>
+        <span>or drop it here</span>
       </label>
 
-      <section id="status" class="status" hidden aria-live="polite">
+      <section id="status" class="box" hidden aria-live="polite">
         <p id="status-text"></p>
         <div class="bar"><div id="bar-fill"></div></div>
       </section>
 
-      <section id="result" class="result" hidden>
+      <section id="result" class="box" hidden>
         <p id="result-text"></p>
+        <p id="warning" class="warning" hidden></p>
         <div class="actions">
-          <a id="download" class="btn primary" download>Download PDF</a>
-          <a id="open" class="btn" target="_blank" rel="noopener">Open in new tab</a>
+          <a id="download" class="btn primary" download>Download PDF again</a>
           <button id="again" class="btn" type="button">Convert another file</button>
         </div>
       </section>
 
-      <p id="error" class="error" hidden role="alert"></p>
-
-      <footer>
-        <p>Tip: for the closest match to the original, make sure the fonts used in the file are installed on this device.</p>
-      </footer>
+      <p id="error" class="box error" hidden role="alert"></p>
     </main>
 
-    <!-- Off-screen area where documents are laid out before being captured. -->
+    <!-- Off-screen area where the document is laid out before it is captured. -->
     <div id="stage" aria-hidden="true"></div>
 
-    <script type="module" src="./src/main.js"></script>
+    <script src="vendor/jszip.min.js"></script>
+    <script src="vendor/docx-preview.min.js"></script>
+    <script src="vendor/jspdf.umd.min.js"></script>
+    <script type="module" src="js/app.js"></script>
     <script>
       // If the app code fails to load, say so instead of silently doing nothing.
       window.addEventListener('load', function () {
         setTimeout(function () {
           if (window.__converterReady) return;
           var box = document.getElementById('error');
-          box.textContent = 'The converter failed to load, so files cannot be converted. ' +
-            'Please refresh the page. If this keeps happening, the site was published without being built ' +
-            '(GitHub Pages source must be set to "GitHub Actions").';
+          box.textContent = 'The converter failed to load. Please refresh the page (Ctrl+Shift+R).';
           box.hidden = false;
-          document.getElementById('drop').classList.add('busy');
         }, 3000);
       });
     </script>

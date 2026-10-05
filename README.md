@@ -1,34 +1,34 @@
-# Word & PowerPoint to PDF
+# Word to PDF
 
-A static web page that converts **.docx** and **.pptx** files to high-resolution PDF.
-All conversion runs in the browser, so it works on GitHub Pages and files never leave the user's device.
+A web page that converts a Word file (**.docx**) to a high-resolution PDF.
+Choose a file, and the PDF downloads automatically. Everything runs in the browser; the file never leaves your device.
+
+Live site: https://sudheernookala.github.io/Online-Converter/
 
 ## How it works
 
-1. The file is laid out in the browser ([docx-preview](https://github.com/VolodymyrBaydalka/docxjs) for Word, [pptx-preview](https://www.npmjs.com/package/pptx-preview) for PowerPoint).
-2. Each page or slide is captured at the chosen resolution (200 / 300 / 450 DPI) with [modern-screenshot](https://github.com/qq15725/modern-screenshot).
-3. The pages are put into a PDF with [jsPDF](https://github.com/parallax/jsPDF), at the original page or slide size. The PDF downloads straight away.
+1. [docx-preview](https://github.com/VolodymyrBaydalka/docxjs) lays out the Word document in the browser.
+2. Each page is captured at **300 DPI** (print quality) with [modern-screenshot](https://github.com/qq15725/modern-screenshot). A Letter page becomes 2550 × 3300 pixels, so pictures stay sharp.
+3. [jsPDF](https://github.com/parallax/jsPDF) puts the pages into a PDF at the original page size.
 
-Images keep their full detail: at 300 DPI an A4/Letter page is about 2550 × 3300 pixels and a 16:9 slide is 4000 × 2250 pixels.
+Pictures are never cut in half at a page break; a picture that does not fit moves to the next page.
+
+## No build step
+
+The site is plain HTML, CSS and JavaScript. The libraries are copied into `vendor/`.
+GitHub Pages can publish it with either setting ("Deploy from a branch" or "GitHub Actions").
+
+Run locally:
+
+```bash
+python3 -m http.server 8000
+# open http://localhost:8000
+```
 
 ## Limits
 
-- **Text in the PDF is an image**, so it cannot be selected or searched.
-- **Layout is close to the original, but not exact.** This is a browser renderer, not Microsoft Office. Complex layouts (text boxes, SmartArt, charts, some animations or effects) may look different.
-- **Fonts:** if a font used in the file is not installed on the device, a similar font is used instead.
-- **Word page breaks:** files saved by Word keep Word's page breaks. Other files are split into pages at line boundaries, and in that case headers and footers appear only on the first page of each section.
-- Old binary **.doc / .ppt** files are not supported. Save them as .docx / .pptx first.
-- Large files use a lot of memory, mostly on phones. Choose a lower resolution if a conversion fails.
-
-## Run locally
-
-```bash
-npm install
-npm run dev      # development server
-npm run build    # static site in dist/
-```
-
-## Deploy to GitHub Pages
-
-1. In the repository, go to **Settings → Pages** and set **Source** to **GitHub Actions**.
-2. Push to `main` (or run the "Deploy to GitHub Pages" workflow by hand). The site is published at `https://<user>.github.io/<repo>/`.
+- **Text in the PDF is part of the page image**, so it cannot be selected or searched.
+- **Layout is close to Word, but not identical.** This is a browser renderer, not Microsoft Word. Text boxes, SmartArt, charts and complex columns may look different.
+- **Fonts:** if a font in the document is not installed on the device, a similar one is used.
+- **EMF/WMF pictures** (common for pasted charts and clip art) cannot be shown by browsers. The page warns when this happens.
+- Old **.doc** files are not supported. Save them as .docx first.

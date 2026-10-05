@@ -7,6 +7,7 @@
   --accent: #d93025;
   --accent-soft: #fdecea;
   --error: #b42318;
+  --warn: #8a5a00;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -19,6 +20,7 @@
     --accent: #f28b82;
     --accent-soft: #3a2422;
     --error: #f97066;
+    --warn: #f5c451;
   }
 }
 * { box-sizing: border-box; }
@@ -28,36 +30,30 @@ body {
   color: var(--text);
   font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
-.app { max-width: 720px; margin: 0 auto; padding: 40px 16px; }
+.app { max-width: 640px; margin: 0 auto; padding: 40px 16px; }
 h1 { margin: 0 0 8px; font-size: 1.8rem; }
 .lead { margin: 0 0 24px; color: var(--muted); }
 
-.options { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
-.options label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; color: var(--muted); flex: 1 1 220px; }
-select {
-  font: inherit; color: var(--text); background: var(--card);
-  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
-}
-
 .drop {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
-  padding: 48px 16px; text-align: center; cursor: pointer;
+  padding: 56px 16px; text-align: center; cursor: pointer;
   background: var(--card); border: 2px dashed var(--border); border-radius: 14px;
   color: var(--muted); transition: border-color .15s, background .15s;
 }
-.drop strong { color: var(--text); font-size: 1.1rem; }
+.drop strong { color: var(--text); font-size: 1.15rem; }
 .drop svg { color: var(--accent); }
 .drop:hover, .drop:focus-visible, .drop.over { border-color: var(--accent); background: var(--accent-soft); outline: none; }
 .drop.busy { pointer-events: none; opacity: .5; }
 
-.status, .result, .error {
+.box {
   margin-top: 20px; padding: 16px; border-radius: 12px;
   background: var(--card); border: 1px solid var(--border);
 }
-.status p, .result p { margin: 0 0 10px; }
+.box p { margin: 0 0 10px; }
 .bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
 #bar-fill { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
-.error { color: var(--error); border-color: var(--error); }
+.error { color: var(--error); border-color: var(--error); margin-bottom: 0; }
+.warning { color: var(--warn); }
 
 .actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .btn {
@@ -68,12 +64,7 @@ select {
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 @media (prefers-color-scheme: dark) { .btn.primary { color: #1f2226; } }
 
-footer { margin-top: 32px; font-size: 0.85rem; color: var(--muted); }
-
-/* Documents are laid out here, outside the visible page. */
-#stage {
-  position: absolute; left: -100000px; top: 0;
-  background: #fff; color: #000;
-}
+/* The document is laid out here, outside the visible page. */
+#stage { position: absolute; left: -100000px; top: 0; background: #fff; color: #000; }
 #stage .docx-wrapper { padding: 0; background: #fff; }
 #stage section.docx { box-shadow: none; margin: 0 0 20px; }
