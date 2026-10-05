@@ -1,0 +1,30 @@
+{
+  "name": "online-converter",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sudheernookala/Online-Converter.git"
+  },
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Sudheernookala/Online-Converter/issues"
+  },
+  "homepage": "https://github.com/Sudheernookala/Online-Converter#readme",
+  "dependencies": {
+    "docx-preview": "^0.4.1",
+    "jspdf": "^4.2.1",
+    "modern-screenshot": "^4.7.0",
+    "pptx-preview": "^1.0.7"
+  },
+  "devDependencies": {
+    "vite": "^8.3.2"
+  },
+  "private": true,
+  "type": "module"
+}
