@@ -1,7 +1,7 @@
 // Word (.docx) to high-resolution PDF, fully in the browser.
 // Libraries: docx-preview (window.docx) lays out the document, modern-screenshot
 // captures each page as a high-resolution image, jsPDF (window.jspdf) builds the PDF.
-import { domToCanvas } from '../vendor/modern-screenshot.mjs';
+import { domToCanvas } from '../vendor/modern-screenshot.mjs?v=4';
 
 // Pages are captured at 300 DPI (print quality).
 const DPI = 300;

@@ -65,6 +65,13 @@ h1 { margin: 0 0 8px; font-size: 1.8rem; }
 @media (prefers-color-scheme: dark) { .btn.primary { color: #1f2226; } }
 
 /* The document is laid out here, outside the visible page. */
-#stage { position: absolute; left: -100000px; top: 0; background: #fff; color: #000; }
+#stage {
+  position: absolute; left: -100000px; top: 0; background: #fff; color: #000;
+  /* Do not let this page's own text settings leak into the document.
+     These are Word's built-in defaults: 10pt Times New Roman, single spacing. */
+  font: normal 400 10pt/normal "Times New Roman", serif;
+  letter-spacing: normal; word-spacing: normal; text-transform: none;
+  -webkit-text-size-adjust: none; text-size-adjust: none;
+}
 #stage .docx-wrapper { padding: 0; background: #fff; }
 #stage section.docx { box-shadow: none; margin: 0 0 20px; }
